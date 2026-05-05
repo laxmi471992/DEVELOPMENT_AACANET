@@ -35,10 +35,15 @@
  *         |            |                     | documentation and parameter-based
  *         |            |                     | date override functionality
  * ----------------------------------------------------------------------------
+ * 1.2     | 2026-05-05 | LK05052026          | Fixed issue where file was generated
+ *         |            |                     | even when data was zero
+ *         |            |                     | Implemented flag-based logic to
+ *         |            |                     | skip file creation when no data
+ * ----------------------------------------------------------------------------
  */
+
 require_once('PHP_XLSXWriter/xlsxwriter.class.php');
 // use XLSXWriter;
-
 function firmCostCheckDetailToMyDownload($path, $id, $reportName, $code_name, $userType, $userReportName, $outputName, $reportDescription, $mailNotification, $sftpId, $mode, $run_by, $reportBasePath, $reportDate = null)
 {
 
@@ -63,6 +68,7 @@ function firmCostCheckDetailToMyDownload($path, $id, $reportName, $code_name, $u
 	 * Check if reportDate parameter is provided
 	 * If provided, use it; otherwise auto-calculate based on current day
 	 */
+
 	if ($reportDate !== null && !empty($reportDate)) {
 		// User provided a specific report date
 		$queryDate = $reportDate;
@@ -76,17 +82,20 @@ function firmCostCheckDetailToMyDownload($path, $id, $reportName, $code_name, $u
 		}
 	}
 
-
 	foreach ($paths as $companyPath) {
+
 		$companyPath = str_replace(["'", " "], "", $companyPath);
 		$RemitAmount = '0';
 		$PaymentAmount = '0';
 		$FeePaidToFirm = '0';
 		$FeeRequestedByFirm = '0';
 		$AmountPaidToFirm = '0';
+
 		$writer = new XLSXWriter();
 		$companyName = createDirgetCompanyName($companyPath, $reportBasePath);
+
 		echo "Processing Company: " . $companyName . "\n";
+
 		$companyStatus = getCompanyStatus($companyName);
 
 		// ====================================================================
@@ -112,22 +121,29 @@ function firmCostCheckDetailToMyDownload($path, $id, $reportName, $code_name, $u
 		 * - Provided via $reportDate parameter, OR
 		 * - Auto-calculated based on current day
 		 */
+
+		
+		$hasData = false;  // LK05052026: Flag to track if actual data exists per company
+
 		$query = "SELECT DISTINCT PYALORGCD
 			from RMAACABHS
 			WHERE RMSTRANCDE='1A'
 			AND CAST(DTPRLT AS DATE) >= '" . $queryDate . "'
 			AND VENDORNUM IN ('" . $companyName . "') group by PYALORGCD ORDER BY  PYALORGCD";
 
-
-
 		$results = getResult($query);
+
 		if ($results['numRows'] > 0) {
+			// LK05052026: commented unconditional header write; now initialized only when data exists to prevent empty file creation
 			$excelPrefix = getExcelPrefix13();
-			$writer->writeSheetHeader($excelPrefix['sheetName'], $excelPrefix['headers'], $excelPrefix['style']);
+			//$writer->writeSheetHeader($excelPrefix['sheetName'], $excelPrefix['headers'], $excelPrefix['style']);
 			$blankrow = array('', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '');
-			$writer->writeSheetRow($excelPrefix['sheetName'], $blankrow);
+			$sheetInitialized = false;
+			//$writer->writeSheetRow($excelPrefix['sheetName'], $blankrow);
+
 			foreach ($results['results'] as $result) {
-				// ============================================================
+
+			// ============================================================
 				// QUERY 2: GET DETAILED TRANSACTION DATA FOR EACH CLIENT CODE
 				// ============================================================
 				
@@ -150,7 +166,8 @@ function firmCostCheckDetailToMyDownload($path, $id, $reportName, $code_name, $u
 					from RMAACABHS
 					WHERE RMSTRANCDE='1A'
 					AND CAST(DTPRLT AS DATE)  >= '" . $queryDate . "'
-					AND VENDORNUM ='" . $companyName . "' AND PYALORGCD='" . $result['PYALORGCD'] . "')SELECT Client_Code as 'Client Code', Acct_Number as 'Acct No.', Last_Name as 'Last Name ', First_Name as 'First Name',
+					AND VENDORNUM ='" . $companyName . "' AND PYALORGCD='" . $result['PYALORGCD'] . "')
+					SELECT Client_Code as 'Client Code', Acct_Number as 'Acct No.', Last_Name as 'Last Name ', First_Name as 'First Name',
 					TR_CD as 'TR CD', Transaction_Date as 'Transaction Date', Transaction_Description as 'Transaction Description',
 					Payment_Amount AS 'Payment Amount' ,Remit_Amount AS 'Remit Amount',
 					Fee_Requested_by_Firm AS 'Fee Requested By Firm',
@@ -161,16 +178,26 @@ function firmCostCheckDetailToMyDownload($path, $id, $reportName, $code_name, $u
 					left join RMSPMASTER AS P
 					ON FIRMCOSTFEE.RMSFILENUM = P.RMSFILENUM
 					ORDER BY  PYALORGCD,Client_Code,Firm_Invoice_Date, Firm_Invoice_No";
+
 				$results = getResult($query);
 
 				if ($results['numRows'] > 0) {
+					// LK05052026: header write now initialized only when data exists to prevent empty file creation
 
+					if (!$sheetInitialized) {
+						$writer->writeSheetHeader($excelPrefix['sheetName'], $excelPrefix['headers'], $excelPrefix['style']);
+						$writer->writeSheetRow($excelPrefix['sheetName'], $blankrow);
+						$sheetInitialized = true;
+					}
+
+					$hasData = true; 
 
 					$PaymentAmountwise = '0';
 					$RemitAmountwise = '0';
 					$FeePaidToFirmwise = '0';
 					$FeeRequestedByFirmwise = '0';
 					$AmountPaidToFirmwise = '0';
+
 					foreach ($results['results'] as $resultRow) {
 
 						$PaymentAmount += $resultRow['Payment Amount'];
@@ -187,45 +214,45 @@ function firmCostCheckDetailToMyDownload($path, $id, $reportName, $code_name, $u
 
 						$AmountPaidToFirm += $resultRow['Amount Paid To Firm'];
 						$AmountPaidToFirmwise += $resultRow['Amount Paid To Firm'];
+
 						$writer->writeSheetRow($excelPrefix['sheetName'], $resultRow);
 					}
-					$newarray1 = array();
+
 					$newarray1 = [$result['PYALORGCD'], '', '', '', '', '', '', $PaymentAmountwise, $RemitAmountwise, $FeeRequestedByFirmwise, $FeePaidToFirmwise, '', '', $AmountPaidToFirmwise, '', '', ''];
 					$writer->writeSheetRow($excelPrefix['sheetName'], $newarray1, $excelPrefix['style1']);
+
 					$blankrow = array('', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '');
 					$writer->writeSheetRow($excelPrefix['sheetName'], $blankrow);
-				} else {
-
-					// ifDataNotPresent($companyStatus, $companyName, $reportName, $report_start_time, $sftpStatus, $FileSizeKB, $path, $run_by);
-					// array_push($DataPresents, array(
-					// 	'paths' => $path,
-					// 	'filename' => $fileName,
-					// 	'clientcode' => $companyName
-					// ));
 				}
 			}
-			$newarray = array();
-			$newarray = ['TOTAL', '', '', '', '', '', '', $PaymentAmount, $RemitAmount, $FeeRequestedByFirm, $FeePaidToFirm, '', '', $AmountPaidToFirm, '', '', ''];
-			$writer->writeSheetRow($excelPrefix['sheetName'], $newarray, $excelPrefix['style1']);
-			$writer->writeToFile(str_replace(__FILE__, $reportBasePath . $companyPath . '/' . $fileName, __FILE__));
-			if (file_exists(str_replace(__FILE__, $reportBasePath . $companyPath . '/' . $fileName, __FILE__))) {
-				$new_status = 2;
-				$$FileSizeKB = 0;
-				$FileSizeKB = getfileSize($reportBasePath . $companyPath . '/' . $fileName);
-				// VK26JAN2026 mailNotifaction($mailNotification, $companyPath, $companyName, $userType, $userReportName, $reportDescription);
 
+			if ($hasData) {  // LK05052026: Proceed with file generation only if data is present 
 
-				array_push($dataPresents, array(
-					'paths' => $companyPath,
-					'filename' => $fileName,
-					'clientcode' => $companyName
-				));
-				// VK26JAN2026 ifDataPresent($companyStatus, $companyName, $reportName, $report_start_time, $sftpStatus, $FileSizeKB, $companyPath, $run_by,$userType);
-				echo "Cost report generated successfully for company: " . $companyName . "\n"; // VK26JAN2026	
+				$newarray = ['TOTAL', '', '', '', '', '', '', $PaymentAmount, $RemitAmount, $FeeRequestedByFirm, $FeePaidToFirm, '', '', $AmountPaidToFirm, '', '', ''];
+				$writer->writeSheetRow($excelPrefix['sheetName'], $newarray, $excelPrefix['style1']);
+
+				$writer->writeToFile(str_replace(__FILE__, $reportBasePath . $companyPath . '/' . $fileName, __FILE__));
+
+				if (file_exists(str_replace(__FILE__, $reportBasePath . $companyPath . '/' . $fileName, __FILE__))) {
+
+					array_push($dataPresents, array(
+						'paths' => $companyPath,
+						'filename' => $fileName,
+						'clientcode' => $companyName
+					));
+        // VK26JAN2026 ifDataPresent($companyStatus, $companyName, $reportName, $report_start_time, $sftpStatus, $FileSizeKB, $companyPath, $run_by,$userType);
+					echo "Cost report generated successfully for company: " . $companyName . "\n";
+				}
+
+			} else {
+				// LK05052026: Skip file creation if no data
+				echo "No data found. File not created.\n"; // 🔧 Laxmi developed
 			}
+
 		} else {
-			// VK26JAN2026 ifDataNotPresent($companyStatus, $companyName, $reportName, $report_start_time, $sftpStatus, $FileSizeKB, $companyPath, $run_by,$userType);
-			echo "cost : No data present for company: " . $companyName . "\n"; // VK26JAN2026
+		// VK26JAN2026 ifDataNotPresent($companyStatus, $companyName, $reportName, $report_start_time, $sftpStatus, $FileSizeKB, $companyPath, $run_by,$userType);
+
+			echo "cost : No data present for company: " . $companyName . "\n";
 
 			array_push($noDataPresents, array(
 				'paths' => $companyPath,
@@ -233,7 +260,9 @@ function firmCostCheckDetailToMyDownload($path, $id, $reportName, $code_name, $u
 				'clientcode' => $companyName
 			));
 		}
-		if (!empty($dataPresents)) {
+	}
+
+	if (!empty($dataPresents)) {
 			$new_status = 2;
 			$msg = 'Report generated successfully';
 			$status_msg = 'generated';
@@ -244,11 +273,14 @@ function firmCostCheckDetailToMyDownload($path, $id, $reportName, $code_name, $u
 			$status_msg = 'Failed';
 			$status = 0;
 		}
-	}
 
-	return array('status' => $status, 'status_msg' => $status_msg, 'new_status' => $new_status);
+	return array(
+    'status' => $status,
+    'status_msg' => $status_msg,
+    'new_status' => $new_status,
+    'msg' => $msg
+);
 }
-
 function getExcelPrefix13()
 {
 
