@@ -35,6 +35,11 @@
  *         |            |                     | documentation and parameter-based
  *         |            |                     | date override functionality
  * ----------------------------------------------------------------------------
+ * * 1.2   | 2026-05-05 | LK05052026          | Fixed issue where file was generated
+ *         |            |                     | even when data was zero
+ *         |            |                     | Implemented flag-based logic to
+ *         |            |                     | skip file creation when no data
+ * ----------------------------------------------------------------------------
  */
 
 require_once('PHP_XLSXWriter/xlsxwriter.class.php');
@@ -49,6 +54,8 @@ function firmFeeCheckDetailToMyDownload($path, $id, $reportName, $code_name, $us
 	$dataPresents = array();
 	$noDataPresents = array();
 	$new_status = 3;
+	// $msg = 'No Data Present';
+	// $sftpStatus = 0;
 	$status_msg = 'Failed';
 	$status = 0;
 	$FileSizeKB = 0;
@@ -90,9 +97,7 @@ function firmFeeCheckDetailToMyDownload($path, $id, $reportName, $code_name, $us
 
 		$companyStatus = getCompanyStatus($companyName);
 
-        // Laxmi developed:actual data presence per company
-
-		$hasData = false;
+		$hasData = false;  // LK05052026: Flag to track if actual data exists per company
 
         // ====================================================================
 		// QUERY 1: GET DISTINCT CLIENT CODES (PYALORGCD) FOR THIS FIRM
@@ -126,11 +131,16 @@ function firmFeeCheckDetailToMyDownload($path, $id, $reportName, $code_name, $us
 
 		$results1 = getResult($query);
 
+		// LK05052026: logic to process multiple result sets (result1, result2) instead of single result for accurate data handling
+
 		if ($results1['numRows'] > 0) {
 
 			$excelPrefix = getExcelPrefix14();
+			// LK05052026: Disabled unconditional header write; now initialized only when data exists to prevent empty file creation
+			// $writer->writeSheetHeader($excelPrefix['sheetName'], $excelPrefix['headers'], $excelPrefix['style']);  // LK05052026
 			$blankrow = array('', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '');
 			$sheetInitialized = false;
+			// $writer->writeSheetRow($excelPrefix['sheetName'], $blankrow);   // LK05052026
 
 			foreach ($results1['results'] as $result) {
 
@@ -145,6 +155,8 @@ function firmFeeCheckDetailToMyDownload($path, $id, $reportName, $code_name, $us
 				 * 
 				 * Note: This query also uses $queryDate variable for consistency
 				 */
+
+				
 
 				$query = "WITH FIRMCOSTFEE AS (
 					select BLAAINNM, LEFT(BLAAINNM, 1) as TYPERT, CUROFFCRCD AS 'Client_Code',VENDORNUM as 'Firm',
@@ -170,12 +182,13 @@ function firmFeeCheckDetailToMyDownload($path, $id, $reportName, $code_name, $us
 					left join RMSPMASTER AS P
 					ON FIRMCOSTFEE.RMSFILENUM = P.RMSFILENUM
 					ORDER BY  PYALORGCD,Client_Code,Firm_Invoice_Date, Firm_Invoice_No";
-
+            
 				$results2 = getResult($query);
 
 				if ($results2['numRows'] > 0) {
+					
 
-                //Laxmi developed:at least one record exists
+               // LK05052026: header write now initialized only when data exists to prevent empty file creation
 
                     if (!$sheetInitialized) {
                         $writer->writeSheetHeader($excelPrefix['sheetName'], $excelPrefix['headers'], $excelPrefix['style']);
@@ -213,12 +226,12 @@ function firmFeeCheckDetailToMyDownload($path, $id, $reportName, $code_name, $us
 
 					$newarray1 = [$result['PYALORGCD'], '', '', '', '', '', '', $PaymentAmountwise, $RemitAmountwise, $FeeRequestedByFirmwise, $FeePaidToFirmwise, '', '', $AmountPaidToFirmwise, '', '', ''];
 					$writer->writeSheetRow($excelPrefix['sheetName'], $newarray1, $excelPrefix['style1']);
-
+                    //$blankrow = array('', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '');
 					$writer->writeSheetRow($excelPrefix['sheetName'], $blankrow);
 				}
 			}
-         // Laxmi developed: create file ONLY if actual data exists
-			if ($hasData) {
+         
+			if ($hasData) {   // LK05052026: Proceed with file generation only if data is present 
 
 				$newarray = ['TOTAL', '', '', '', '', '', '', $PaymentAmount, $RemitAmount, $FeeRequestedByFirm, $FeePaidToFirm, '', '', $AmountPaidToFirm, '', '', ''];
 				$writer->writeSheetRow($excelPrefix['sheetName'], $newarray, $excelPrefix['style1']);
@@ -243,7 +256,8 @@ function firmFeeCheckDetailToMyDownload($path, $id, $reportName, $code_name, $us
 				}
 
 			} else {
-                // Laxmi developed: prevent empty file creation
+                // LK05052026: Skip file creation if no data
+
 				echo "No data found. File not created.\n";
 			}
 
