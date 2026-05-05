@@ -35,9 +35,15 @@
  *         |            |                     | documentation and parameter-based
  *         |            |                     | date override functionality
  * ----------------------------------------------------------------------------
+ * 1.2     | 2026-05-05 | LK05052026          | Fixed issue where file was generated
+ *         |            |                     | even when data was zero
+ *         |            |                     | Implemented flag-based logic to
+ *         |            |                     | skip file creation when no data
+ * ----------------------------------------------------------------------------
  */
 
 require_once('PHP_XLSXWriter/xlsxwriter.class.php');
+// use XLSXWriter;
 
 function firmCostCheckDetailToMyDownload($path, $id, $reportName, $code_name, $userType, $userReportName, $outputName, $reportDescription, $mailNotification, $sftpId, $mode, $run_by, $reportBasePath, $reportDate = null)
 {
@@ -117,8 +123,8 @@ function firmCostCheckDetailToMyDownload($path, $id, $reportName, $code_name, $u
 		 * - Auto-calculated based on current day
 		 */
 
-		// 🔧 Laxmi developed: track actual data
-		$hasData = false;
+		
+		$hasData = false;  // LK05052026: Flag to track if actual data exists per company
 
 		$query = "SELECT DISTINCT PYALORGCD
 			from RMAACABHS
@@ -129,10 +135,12 @@ function firmCostCheckDetailToMyDownload($path, $id, $reportName, $code_name, $u
 		$results = getResult($query);
 
 		if ($results['numRows'] > 0) {
-
+			// LK05052026: commented unconditional header write; now initialized only when data exists to prevent empty file creation
 			$excelPrefix = getExcelPrefix13();
+			//$writer->writeSheetHeader($excelPrefix['sheetName'], $excelPrefix['headers'], $excelPrefix['style']);
 			$blankrow = array('', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '');
 			$sheetInitialized = false;
+			//$writer->writeSheetRow($excelPrefix['sheetName'], $blankrow);
 
 			foreach ($results['results'] as $result) {
 
@@ -175,6 +183,7 @@ function firmCostCheckDetailToMyDownload($path, $id, $reportName, $code_name, $u
 				$results = getResult($query);
 
 				if ($results['numRows'] > 0) {
+					// LK05052026: header write now initialized only when data exists to prevent empty file creation
 
 					if (!$sheetInitialized) {
 						$writer->writeSheetHeader($excelPrefix['sheetName'], $excelPrefix['headers'], $excelPrefix['style']);
@@ -182,7 +191,7 @@ function firmCostCheckDetailToMyDownload($path, $id, $reportName, $code_name, $u
 						$sheetInitialized = true;
 					}
 
-					$hasData = true; // 🔧 Laxmi developed
+					$hasData = true; 
 
 					$PaymentAmountwise = '0';
 					$RemitAmountwise = '0';
@@ -218,8 +227,7 @@ function firmCostCheckDetailToMyDownload($path, $id, $reportName, $code_name, $u
 				}
 			}
 
-			// 🔧 Laxmi developed: only create file if data exists
-			if ($hasData) {
+			if ($hasData) {  // LK05052026: Proceed with file generation only if data is present 
 
 				$newarray = ['TOTAL', '', '', '', '', '', '', $PaymentAmount, $RemitAmount, $FeeRequestedByFirm, $FeePaidToFirm, '', '', $AmountPaidToFirm, '', '', ''];
 				$writer->writeSheetRow($excelPrefix['sheetName'], $newarray, $excelPrefix['style1']);
@@ -238,6 +246,7 @@ function firmCostCheckDetailToMyDownload($path, $id, $reportName, $code_name, $u
 				}
 
 			} else {
+				// LK05052026: Skip file creation if no data
 				echo "No data found. File not created.\n"; // 🔧 Laxmi developed
 			}
 
